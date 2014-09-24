@@ -139,3 +139,7 @@ for iif = 1:length(classification.indices)
     end
 end
 
+%% Save the results of the virtual lesion to disk
+save('virtualLesion_stats.mat','se')
+
+%% END 
