@@ -65,8 +65,28 @@ if ~exist(fibersFolder,'dir'), mkdir(fibersFolder); end
 dt6_file = fullfile(dataDir,dt6_dir_name,'dti96trilin','dt6.mat');
 [status, ~, fg] = feTrack({'prob'}, dt6_file,fibersFolder,mrtrix_findlmax(90),nFascicles);
 toc
-       
-%% Run AFQ
+
+%% Build the LiFE model.
+dwiFile =  '/home/frk/2t1/fp96_data_variability/dt6_run01_fliprot__4mm/run01_fliprot_aligned_trilin_aligned_trilin.nii.gz';
+feFileName = ['fe_structure_',dt6_dir_name];
+tic, feFolder = fullfile(dataDir,dt6_dir_name, 'LiFE');
+if ~exist(feFolder,'dir'), mkdir(feFolder); end
+fe = feConnectomeInit(dwiFile,fg,feFileName,feFolder,dwiFile,t1FileName);
+fe = feSet(fe,'fit',feFitModel(feGet(fe,'mfiber'),feGet(fe,'dsigdemeaned'),'bbnnls'));
+
+%% Extract the new whole-brain fiber group
+minWeight = 0; % This is an arbitrary choice.
+fg = feGet(fe,'fibers acpc');
+w  = feGet(fe,'fiber weights');
+fascicles2keep = w > minWeight; 
+
+%% Now reduce all the fields of the fe structure to containing only information about the fibers left in.
+fe = feConnectomeReduceFibers(fe, fascicles2keep );
+
+%% Extract the fiber group
+fg = feGet(fe,'fibers acpc');
+
+%% Run AFQ using the LiFE preprocesed fiber group
 % Segment the fibers using AFQ
 tic, [fg_classified,~,classification]= AFQ_SegmentFiberGroups(dt6_file, fg);
 toc
@@ -75,7 +95,7 @@ toc
 tic, fascicles = fg2Array(fg_classified);
 toc
 
-% Write the fascicles down to disk as independent files
+% Write the fascicles down to disk as independent .mat fiber group files
 tic, afqFolder = fullfile(dataDir,dt6_dir_name, 'AFQ');
 if ~exist(afqFolder,'dir'), mkdir(afqFolder); end
 for iif = 1:length(fascicles)
@@ -99,12 +119,23 @@ end
 classFile2Save = fullfile(afqFolder,'tracts_classification_indices');
 save(classFile2Save,'fg_classified','classification','fascicles1')
 
-%% Build the LiFE model.
-dwiFile =  '/home/frk/2t1/fp96_data_variability/dt6_run01_fliprot__4mm/run01_fliprot_aligned_trilin_aligned_trilin.nii.gz';
-feFileName = ['fe_structure_',dt6_dir_name];
-tic, feFolder = fullfile(dataDir,dt6_dir_name, 'LiFE');
-if ~exist(feFolder,'dir'), mkdir(feFolder); end
-fe = feConnectomeInit(dwiFile,fg,feFileName,feFolder,dwiFile,t1FileName);
-fe = feSet(fe,'fit',feFitModel(feGet(fe,'mfiber'),feGet(fe,'dsigdemeaned'),'bbnnls'));
+% Perform a virtual lesion for each fascicle and return the se structure 
+% containing the statistics of the lesions, plus save to disk figures of 
+% the anatomy of the lesion and the error distributions.
 
-% Perform a virtual lesion
+% Set the paramters to display anatomy, distribution and evidence stats.
+display.tract = true;
+display.distributions = true; 
+display.evidence = true; 
+
+for iif = 1:length(classification.indices)
+    fprintf('\n Performing leasion of %s .\n',classification.names{iif})
+    [se(iif), figs] = feVirtualLesion(fe,classification.indices{iif})
+    
+    % Save figures to disk
+    for iip = 1:length(figs)
+      feSavefig(figs(iip).h,'figName',figs(iip).name, 'figDir', pwd, 'figType', figs(iip).type)
+      close(fig(iip).h)
+    end
+end
+
